@@ -1,0 +1,59 @@
+#!/bin/bash
+set -e
+
+PORT="/dev/ttyACM0"
+UF2=".pio/build/pico/firmware.uf2"
+
+echo "[1/4] Building..."
+pio run
+
+echo "[2/4] Resetting Pico into BOOTSEL..."
+
+# Start socat exactly like the working manual command
+socat -d -d "$PORT,b1200,clocal=0" - &
+SOCAT_PID=$!
+
+# Wait for the Pico's RPI-RP2 partition to appear
+echo "[3/4] Waiting for RPI-RP2..."
+
+DEVICE=""
+
+for i in {1..100}; do
+    DEVICE=$(lsblk -nrpo NAME,LABEL 2>/dev/null \
+        | awk '$2 == "RPI-RP2" {print $1; exit}')
+
+    if [ -n "$DEVICE" ]; then
+        echo "Found: $DEVICE"
+        break
+    fi
+
+    sleep 0.1
+done
+
+# Stop socat, equivalent to pressing Ctrl-C
+kill "$SOCAT_PID" 2>/dev/null || true
+wait "$SOCAT_PID" 2>/dev/null || true
+
+if [ -z "$DEVICE" ]; then
+    echo "ERROR: RPI-RP2 device not found."
+    exit 1
+fi
+
+echo "Mounting RPI-RP2..."
+
+udisksctl mount -b "$DEVICE"
+
+MOUNT=$(findmnt -rn -S "$DEVICE" -o TARGET)
+
+if [ -z "$MOUNT" ]; then
+    echo "ERROR: Could not find mount point."
+    exit 1
+fi
+
+echo "Copying firmware..."
+
+cp "$UF2" "$MOUNT/"
+sync
+
+echo
+echo "Upload complete!"
