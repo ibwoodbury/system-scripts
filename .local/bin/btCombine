@@ -1,0 +1,37 @@
+#!/bin/bash
+
+COMBINED="all_bluetooth"
+
+# Remove existing combined sink
+pactl list short modules |
+    awk -v name="$COMBINED" '
+        $2 == "module-combine-sink" && $3 ~ "sink_name=" name {
+            print $1
+        }
+    ' |
+    xargs -r -n1 pactl unload-module
+
+# Find currently connected Bluetooth audio sinks
+BT_SINKS=$(pactl list short sinks |
+    awk '$2 ~ /^bluez_output\./ {print $2}')
+
+# No Bluetooth devices
+if [ -z "$BT_SINKS" ]; then
+    echo "No Bluetooth audio devices connected."
+    exit 0
+fi
+
+# Convert newline-separated list to comma-separated list
+SLAVES=$(echo "$BT_SINKS" | paste -sd,)
+
+echo "Combining:"
+echo "$BT_SINKS"
+
+# Create combined sink
+pactl load-module module-combine-sink \
+    sink_name="$COMBINED" \
+    sink_properties=device.description="All Bluetooth Audio" \
+    slaves="$SLAVES"
+
+# Make it default
+pactl set-default-sink "$COMBINED"
